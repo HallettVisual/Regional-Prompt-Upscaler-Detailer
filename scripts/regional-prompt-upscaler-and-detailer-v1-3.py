@@ -61,7 +61,7 @@ from transformers import (
     AutoProcessor, AutoModelForCausalLM
 )
 
-from scripts.dof_features import DepthOfFieldFeatures
+# from scripts.dof_features import DepthOfFieldFeatures # Removed
 
 
 # -------------------------------------------------
@@ -396,9 +396,9 @@ class USDURedraw:
         feather_amount: int = 50,
         save_tiles: bool = False,
         turn_to_night: bool = False,
-        enable_content_analysis: bool = False,
-        min_keyword_overlap: int = 2,
-        context_window_scale: float = 2.0,
+        # enable_content_analysis: bool = False, # Removed
+        # min_keyword_overlap: int = 2, # Removed
+        # context_window_scale: float = 2.0, # Removed
         prompt_mode_tile: str = "Simple",
         exclude_categories: Dict[str, bool] = None,
         # Additional user-provided words to remove
@@ -415,9 +415,9 @@ class USDURedraw:
 
         self.prompt_generator = usdupscaler.prompt_generator
         self.turn_to_night = turn_to_night and NIGHT_MODE_AVAILABLE
-        self.enable_content_analysis = enable_content_analysis
-        self.min_keyword_overlap = min_keyword_overlap
-        self.context_window_scale = context_window_scale
+        # self.enable_content_analysis = False # Removed
+        # self.min_keyword_overlap = 2 # Removed
+        # self.context_window_scale = 2.0 # Removed
         self.prompt_mode_tile = prompt_mode_tile
         self.save = False
 
@@ -437,7 +437,7 @@ class USDURedraw:
             self.words_to_remove = [w.strip().lower() for w in user_words_to_remove.split(",") if w.strip()]
 
         # DOF
-        self.dof_handler = DepthOfFieldFeatures()
+        # self.dof_handler = DepthOfFieldFeatures() # Removed
 
         # Tiling
         self.cols = 1
@@ -477,9 +477,10 @@ class USDURedraw:
         tile_prompt = self._apply_content_filters(tile_prompt)
         logger.debug(f"After content filters => {tile_prompt}")
 
-        if self.enable_content_analysis:
-            tile_prompt = self._analyze_and_enhance_prompt(tile_image, tile_prompt)
-            logger.debug(f"After content analysis => {tile_prompt}")
+        # Content analysis block removed
+        # if self.enable_content_analysis:
+        #     tile_prompt = self._analyze_and_enhance_prompt(tile_image, tile_prompt)
+        #     logger.debug(f"After content analysis => {tile_prompt}")
 
         return tile_prompt
 
@@ -515,43 +516,17 @@ class USDURedraw:
         cleaned = re.sub(pattern, '', prompt, flags=re.IGNORECASE)
         return ' '.join(cleaned.split())
 
-    def _analyze_and_enhance_prompt(self, image: Image.Image, prompt: str) -> str:
-        current_keywords = set(self.get_important_keywords(prompt))
-        global_keywords = set(self.get_important_keywords(self.entire_image_prompt))
+    # _analyze_and_enhance_prompt method removed as it's no longer used.
 
-        try:
-            depth_score, _ = self.dof_handler.analyze_region_depth(image)
-            enhanced_prompt = self.dof_handler.analyze_dof_context(
-                prompt,
-                context_keywords=current_keywords,
-                global_keywords=global_keywords,
-                depth_value=depth_score
-            )
-            if len(current_keywords & global_keywords) < self.min_keyword_overlap:
-                enhanced_prompt += " Maintain consistency with overall image."
-            return enhanced_prompt
-        except Exception as e:
-            logger.error(f"Error in content analysis: {e}")
-            return prompt
-
-    def get_important_keywords(self, text: str) -> List[str]:
-        common_words = {
-            'a','an','the','in','on','at','with','and','or','of','to','for',
-            'is','are','was','were','be','been','being','by','that','this',
-            'these','those','it','its','from','as','has','have','had'
-        }
-        if not text:
-            return []
-        words = text.lower().split()
-        return [w for w in words if w and len(w) > 1 and w not in common_words]
+    # get_important_keywords method removed as it's no longer used.
 
     # -------------------------------------------
     # Multi-tile
     # -------------------------------------------
     def pre_analyze(self, image: Image.Image) -> List[List[str]]:
         self.analyze_full_image()
-        global_keywords = set(self.get_important_keywords(self.entire_image_prompt))
-        logger.info(f"[Global Keywords] => {global_keywords}")
+        # global_keywords = set(self.get_important_keywords(self.entire_image_prompt)) # Removed
+        # logger.info(f"[Global Keywords] => {global_keywords}") # Removed
         return self._generate_tile_prompts(image)
 
     def _generate_tile_prompts(self, image: Image.Image) -> List[List[str]]:
@@ -712,9 +687,6 @@ class USDUpscaler:
         feather_amount: int,
         save_tiles: bool,
         turn_to_night: bool,
-        enable_content_analysis: bool,
-        min_keyword_overlap: int,
-        context_window_scale: float,
         exclude_categories: Dict[str, bool],
         user_words_to_remove: str,
         auto_scale: bool
@@ -749,9 +721,7 @@ class USDUpscaler:
             feather_amount=feather_amount,
             save_tiles=save_tiles,
             turn_to_night=turn_to_night,
-            enable_content_analysis=enable_content_analysis,
-            min_keyword_overlap=min_keyword_overlap,
-            context_window_scale=context_window_scale,
+            # enable_content_analysis, min_keyword_overlap, context_window_scale removed
             prompt_mode_tile=prompt_mode_tile,
             exclude_categories=exclude_categories,
             user_words_to_remove=user_words_to_remove
@@ -1106,22 +1076,6 @@ class Script(scripts.Script):
                         debug_logging = gr.Checkbox(label="Enable Debug Logging", value=False)
 
             gr.HTML("<hr style='margin: 15px 0; border: none; border-top: 1px solid rgba(128,128,128,0.2);'>")
-            enable_content_analysis = gr.Checkbox(label='Enable Content Analysis', value=False)
-            min_keyword_overlap = gr.Slider(
-                label="Keyword Overlap (1-5)",
-                minimum=1, maximum=5, step=1, value=2, visible=False
-            )
-            context_window_scale = gr.Slider(
-                label="Context Window Scale (1.5 - 3.0)",
-                minimum=1.5, maximum=3.0, step=0.5, value=2.0, visible=False
-            )
-
-            # Show/hide advanced content sliders
-            enable_content_analysis.change(
-                lambda x: [gr.update(visible=x), gr.update(visible=x)],
-                inputs=[enable_content_analysis],
-                outputs=[min_keyword_overlap, context_window_scale]
-            )
 
             # Refresh lora
             refresh_lora_btn.click(
@@ -1151,11 +1105,9 @@ class Script(scripts.Script):
             # First 20 known args + category checkboxes
             # Important: This must match exactly what run() expects
             return [
-                enable_content_analysis,
                 upscaler_name,
                 tile_size, tile_size_min, tile_size_max,
                 feather_amount, overlap_percentage,
-                min_keyword_overlap, context_window_scale,
                 base_prompt, clip_prompt_suffix,
                 prompt_method, prompt_mode_tile,
                 save_prompts_to_file, upload_prompt_file,
@@ -1170,22 +1122,20 @@ class Script(scripts.Script):
     def run(self, p, *all_args):
         """
         The order of arguments is exactly as returned in ui():
-        - 20 known arguments up to words_to_remove
+        - 19 known arguments up to auto_scale (after removing 3)
         - + 8 category checkboxes in the specified order
 
         We'll parse them carefully below.
         """
         # Split arguments into known args and category values
-        known_args = all_args[:22]  # First 22 are known parameters
-        cat_checkbox_values = all_args[22:]  # Remaining are category checkboxes
+        known_args = all_args[:19]  # First 19 are known parameters
+        cat_checkbox_values = all_args[19:]  # Remaining are category checkboxes
 
         # Unpack known arguments in the same order as ui() returns them
         (
-            enable_content_analysis,
             upscaler_name,
             tile_size, tile_size_min, tile_size_max,
             feather_amount, overlap_percentage,
-            min_keyword_overlap, context_window_scale,
             base_prompt, clip_prompt_suffix,
             prompt_method, prompt_mode_tile,
             save_prompts_to_file, upload_prompt_file,
@@ -1205,10 +1155,6 @@ class Script(scripts.Script):
         exclude_categories = {}
         for i, (cat_key, _) in enumerate(self.category_order):
             exclude_categories[cat_key] = bool(cat_checkbox_values[i])
-
-        if not enable_content_analysis:
-            min_keyword_overlap = 2
-            context_window_scale = 2.0
 
         fix_seed(p)
         global_seed = p.seed
@@ -1245,9 +1191,7 @@ class Script(scripts.Script):
             feather_amount=feather_amount,
             save_tiles=save_tiles,
             turn_to_night=turn_to_night,
-            enable_content_analysis=enable_content_analysis,
-            min_keyword_overlap=min_keyword_overlap,
-            context_window_scale=context_window_scale,
+            # enable_content_analysis, min_keyword_overlap, context_window_scale removed
             exclude_categories=exclude_categories,
             user_words_to_remove=words_to_remove,
             auto_scale=auto_scale
