@@ -58,8 +58,6 @@ except ImportError:
         sys.exit(1)  # Exit the script if installation fails
 
 from transformers import (
-    BlipProcessor, BlipForConditionalGeneration,
-    ViTImageProcessor, GPT2Tokenizer, VisionEncoderDecoderModel,
     AutoProcessor, AutoModelForCausalLM
 )
 
@@ -323,82 +321,6 @@ class PromptGeneratorBase:
         return f"{prefix.strip()} an image {suffix.strip()}".strip()
 
 
-class BLIPPromptGenerator(PromptGeneratorBase):
-    def __init__(self, device: torch.device, model_name="Salesforce/blip-image-captioning-base"):
-        super().__init__(device)
-        self.processor = BlipProcessor.from_pretrained(model_name)
-        self.model = BlipForConditionalGeneration.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16 if device.type == 'cuda' else torch.float32
-        ).to(device).eval()
-
-    def generate_prompt(
-        self,
-        image: Image.Image,
-        prompt_mode: str = "Complex",
-        max_words: Optional[int] = None,
-        prefix: str = "",
-        suffix: str = ""
-    ) -> str:
-        if prompt_mode.lower() == "complex":
-            initial_text = "Provide a highly detailed description of the image, describing style, content, and context."
-        else:
-            initial_text = "A picture of"
-
-        inputs = self.processor(
-            images=image,
-            text=initial_text,
-            return_tensors="pt"
-        ).to(self.device, dtype=torch.float16 if self.device.type == 'cuda' else torch.float32)
-
-        config = self.get_generation_config(prompt_mode)
-        try:
-            with torch.no_grad():
-                out_ids = self.model.generate(**inputs, **config)
-            caption = self.processor.decode(out_ids[0], skip_special_tokens=True)
-            if max_words:
-                caption = " ".join(caption.split()[:max_words])
-
-            return f"{prefix.strip()} {caption} {suffix.strip()}".strip()
-
-        except Exception as e:
-            logger.error(f"[BLIP Error] {e}")
-            return "an image"
-        finally:
-            torch.cuda.empty_cache()
-            gc.collect()
-
-
-class ViTGPT2PromptGenerator(PromptGeneratorBase):
-    def __init__(self, device: torch.device):
-        super().__init__(device)
-        self.image_processor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-        self.tokenizer = GPT2Tokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-        self.model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning").to(device).eval()
-
-    def generate_prompt(
-        self,
-        image: Image.Image,
-        prompt_mode: str = "Complex",
-        max_words: Optional[int] = None,
-        prefix: str = "",
-        suffix: str = ""
-    ) -> str:
-        config = self.get_generation_config(prompt_mode)
-        pixel_values = self.image_processor(images=image, return_tensors="pt").pixel_values.to(self.device)
-        try:
-            with torch.no_grad():
-                out = self.model.generate(pixel_values, **config)
-            caption = self.tokenizer.decode(out[0], skip_special_tokens=True)
-            if max_words:
-                caption = " ".join(caption.split()[:max_words])
-            return f"{prefix.strip()} {caption} {suffix.strip()}".strip()
-
-        except Exception as e:
-            logger.error(f"[ViT-GPT2 Error] {e}")
-            return "an image"
-
-
 class Florence2PromptGenerator(PromptGeneratorBase):
     def __init__(self, device: torch.device, task_option="Caption"):
         super().__init__(device)
@@ -453,52 +375,6 @@ class Florence2PromptGenerator(PromptGeneratorBase):
         except Exception as e:
             logger.error(f"[Florence-2 Error] {e}")
             return "an image"
-
-
-class CLIPPromptGenerator(PromptGeneratorBase):
-    def __init__(self, device: torch.device):
-        super().__init__(device)
-        from clip_interrogator import Config, Interrogator
-        self.config = Config(
-            clip_model_name="ViT-L-14/openai",
-            device="cuda" if device.type == "cuda" else "cpu"
-        )
-        self.interrogator = Interrogator(self.config)
-        self.prompt_cache = {}
-
-    def generate_prompt(
-        self,
-        image: Image.Image,
-        prompt_mode: str = "Complex",
-        max_words: Optional[int] = None,
-        prefix: str = "",
-        suffix: str = ""
-    ) -> str:
-        img_hash = self._hash(image)
-        if img_hash in self.prompt_cache:
-            return self.prompt_cache[img_hash]
-
-        try:
-            if prompt_mode.lower() == "simple":
-                caption = self.interrogator.interrogate_fast(image)
-            else:
-                caption = self.interrogator.interrogate(image)
-
-            if max_words:
-                caption = " ".join(caption.split()[:max_words])
-
-            out = f"{prefix.strip()} {caption} {suffix.strip()}".strip()
-            self.prompt_cache[img_hash] = out
-            return out
-        except Exception as e:
-            logger.error(f"[CLIP Error] {e}")
-            return "an image"
-
-    def _hash(self, image: Image.Image) -> str:
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        import hashlib
-        return hashlib.md5(buf.getvalue()).hexdigest()
 
 
 # -------------------------------------------------
@@ -897,14 +773,8 @@ class USDUpscaler:
 
         dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         try:
-            if method == "BLIP":
-                gen = BLIPPromptGenerator(dev)
-            elif method == "ViT-GPT2":
-                gen = ViTGPT2PromptGenerator(dev)
-            elif method == "Florence-2":
+            if method == "Florence-2":
                 gen = Florence2PromptGenerator(dev, task_option="Detailed Caption")
-            elif method == "CLIP":
-                gen = CLIPPromptGenerator(dev)
             else:
                 raise ValueError(f"Unsupported prompt method: {method}")
 
@@ -1195,7 +1065,7 @@ class Script(scripts.Script):
                         gr.HTML("<b>Prompt Generation</b>")
                         prompt_method = gr.Dropdown(
                             label="Method",
-                            choices=["BLIP", "ViT-GPT2", "Florence-2", "CLIP", "NONE"],
+                            choices=["Florence-2", "NONE"],
                             value="Florence-2"
                         )
                         prompt_mode_tile = gr.Dropdown(
